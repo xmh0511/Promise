@@ -18,6 +18,18 @@ struct is_promise_type<Promise<Args...>>
 };
 
 template<typename...Args>
+struct is_promise_type<Promise<Args...>&>
+{
+	static constexpr bool value = true;
+};
+
+template<typename...Args>
+struct is_promise_type<Promise<Args...>&&>
+{
+	static constexpr bool value = true;
+};
+
+template<typename...Args>
 struct has_no_promise
 {
 	
@@ -40,6 +52,13 @@ class PromiseBase
 public:
 	virtual ~PromiseBase() = default;
 };
+
+enum class promise_state
+{
+	pending,
+	fulfilled,
+	rejected
+};
 template<typename...Args>
 class Promise:public PromiseBase
 {
@@ -54,28 +73,47 @@ public:
 
 	Promise(Promise const& p):args_tuple(p.args_tuple)
 	{
-		std::cout << "copy construct" << std::endl;
+		//std::cout << "copy construct" << std::endl;
+	}
+
+	Promise& operator=(Promise const& p)
+	{
+		args_tuple = p.args_tuple;
+		return *this;
 	}
 
 	~Promise()
 	{
-		std::cout << "Promise destory" << std::endl;
+		//std::cout << "Promise destory" << std::endl;
 	}
 public:
 	template<typename Function>
 	auto then(Function&& function)
 	{
-		return then_call(std::forward<Function>(function), std::make_index_sequence<sizeof...(Args)>{});
+		auto cb =  then_call(std::forward<Function>(function), std::make_index_sequence<sizeof...(Args)>{});
+		while (status_ == promise_state::pending)
+		{
+
+		}
+		return cb;
+	}
+public:
+	template<typename...Params>
+	auto resolve(Params&&...args)->Promise<Params...>
+	{
+		status_ = promise_state::fulfilled;
+		return Promise<Params...>(std::forward<Params>(args)...);
 	}
 private:
 	template<typename Function,std::size_t...Indexs>
 	auto then_call(Function&& function,std::index_sequence<Indexs...>)
 	{
-		return function(std::get<Indexs>(args_tuple)...);
+		return function(this,std::get<Indexs>(args_tuple)...);
 	}
 
 private:
 	std::tuple<Args...> args_tuple;
+	promise_state status_ = promise_state::pending;
 };
 
 template<typename...Args>
