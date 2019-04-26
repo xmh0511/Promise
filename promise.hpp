@@ -101,5 +101,9 @@ namespace xmh {
 			return pm;
 		}
 	};
+
+	promise<> get_promise() {
+		return promise<>{};
+	}
 }
 #define GO(...) std::thread([]{ __VA_ARGS__ }).detach();

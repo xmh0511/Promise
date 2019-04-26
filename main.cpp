@@ -1,7 +1,7 @@
 #include <iostream>
 #include "promise.hpp"
 int main() {
-	GO(xmh::promise<>{}.then([](){
+	GO(xmh::get_promise().then([](){
 		xmh::promise_co<int> pm{};
 		std::thread([pm]() {
 			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
