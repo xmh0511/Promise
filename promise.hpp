@@ -1,185 +1,105 @@
 #pragma once
-#include <iostream>
+#include <thread>
+#include <condition_variable>
 #include <tuple>
-#include <string>
+#include <functional>
+#include <mutex>
 #include <memory>
-template<typename...Args>
-class Promise;
-
-template<typename T>
-struct is_promise_type
-{
-	static constexpr bool value = false;
-};
-
-template<typename...Args>
-struct is_promise_type<Promise<Args...>>
-{
-	static constexpr bool value = true;
-};
-
-//template<typename...Args>
-//struct is_promise_type<Promise<Args...>&>
-//{
-//	static constexpr bool value = true;
-//};
-//
-//template<typename...Args>
-//struct is_promise_type<Promise<Args...>&&>
-//{
-//	static constexpr bool value = true;
-//};
-
-template<typename...Args>
-struct context
-{
-
-};
-
-template<typename...Args>
-struct has_no_promise
-{
-	
-};
-
-template<typename T,typename...Args>
-struct has_no_promise<T,Args...>
-{
-	static constexpr bool value = !is_promise_type<T>::value && has_no_promise<Args...>::value;
-};
-
-template<>
-struct has_no_promise<>
-{
-	static constexpr bool value = true;
-};
-
-class PromiseBase
-{
-public:
-	virtual ~PromiseBase() = default;
-};
-
-enum class promise_state
-{
-	pending,
-	fulfilled,
-	rejected
-};
-template<typename...Args>
-class Promise:public PromiseBase
-{
-public:
-	Promise() = default;
-
-	template<typename...Params,typename  = std::enable_if_t<has_no_promise<Params...>::value>>
-	Promise(Params&&...params) //:args_tuple(std::forward<Params>(params)...)
+#include <string>
+namespace xmh {
+	template<typename...Args>
+	class promise;
+	template<typename...Args>
+	class promise_co
 	{
-		std::cout << typeid(context<Params...>).name() << std::endl;
-	}
-
-	Promise(Promise const& p):args_tuple(p.args_tuple)
-	{
-		//std::cout << "copy construct" << std::endl;
-	}
-
-	Promise& operator=(Promise const& p)
-	{
-		args_tuple = p.args_tuple;
-		return *this;
-	}
-
-	~Promise()
-	{
-		//std::cout << "Promise destory" << std::endl;
-	}
-public:
-	template<typename Function>
-	auto then(Function&& function)
-	{
-		while (status_ == promise_state::pending)
-		{
-
+	public:
+		promise_co() {
+			promise_ = std::make_shared<promise<Args...>>();
 		}
-		auto cb =  then_call(std::forward<Function>(function), std::make_index_sequence<sizeof...(Args)>{});
-		return cb;
-	}
-public:
-	template<typename...Params>
-	auto resolve(Params&&...args)
-	{
-		args_tuple = std::tuple<Args...>(args...);
-		status_ = promise_state::fulfilled;
-	}
+		template<typename...Params>
+		void resolve(Params&&...params) const {
+			promise_->resolve(std::forward<Params>(params)...);
+		}
+		template<typename Lambda>
+		auto then(Lambda&& function) const {
+			return promise_->then(std::forward<Lambda>(function));
+		}
+	private:
+		mutable std::shared_ptr<promise<Args...>> promise_;
+	};
 
-	static auto create()
+	enum  class promise_state :std::uint32_t
 	{
-		return std::make_shared<Promise>();
-	}
-private:
-	template<typename Function,std::size_t...Indexs>
-	auto then_call(Function&& function,std::index_sequence<Indexs...>)
+		init,
+		pending,
+		resolve,
+		reject,
+	};
+
+	template<typename...Args>
+	class promise
 	{
-		return function(std::get<Indexs>(args_tuple)...);
-	}
+		//template<typename T>
+		//friend class promise_co<T>;
+	public:
+		promise() {
+			state_ = promise_state::init;
+		}
+	public:
+		template<typename...Params>
+		void resolve(Params&&...params) {
+			//std::cout << typeid(arguments_).name() << "   " << sizeof...(params)<<"   "<<typeid(tp).name() << std::endl;
+			arguments_ = std::tuple<Args...>(static_cast<Args>(params)...);
+			resolvet_ = std::thread([that = this]() mutable {
+				std::unique_lock<std::mutex> lck(that->other_mutex_);
+				that->other_cv_.wait(lck,[that]() {
+					return that->state_ == promise_state::pending;
+				});
+				if (that->state_ == promise_state::pending) {
+					that->state_ = promise_state::resolve;
+					that->cv.notify_one();
+				}
+			});
+			resolvet_.detach();
+		}
+		template<typename Lambda>
+		auto then(Lambda&& function) {
+			std::unique_lock<std::mutex> lck(mutex_);
+			{
+				std::unique_lock<std::mutex> lck0(other_mutex_);
+				state_ = promise_state::pending;
+			}
+			other_cv_.notify_one();
+			cv.wait(lck, [this]() {
+				return this->state_ == promise_state::resolve;
+			});
+			return apply(std::forward<Lambda>(function), std::make_index_sequence<sizeof...(Args)>{});
+		}
+	protected:
+		template<std::size_t...Indexs, typename Lambda>
+		auto apply(Lambda&& function, std::index_sequence<Indexs...>) {
+			return function(std::get<Indexs>(arguments_)...);
+		}
+	private:
+		std::tuple<Args...> arguments_;
+		std::mutex mutex_;
+		std::condition_variable cv;
+		promise_state state_;
+		std::thread resolvet_;
+		std::mutex other_mutex_;
+		std::condition_variable other_cv_;
+	};
 
-private:
-	std::tuple<Args...> args_tuple;
-	promise_state status_ = promise_state::pending;
-};
-
-template<>
-class Promise<> :public PromiseBase
-{
-public:
-	Promise() = default;
-public:
-	template<typename Function>
-	auto then(Function&& function)
+	template<>
+	class promise<>
 	{
-		auto cb = function();
-		return cb;
-	}
-	static auto create()
-	{
-		return std::make_shared<Promise>();
-	}
-};
-
-template<typename...Args>
-class promise_co
-{
-public:
-	promise_co() = default;
-
-	promise_co(promise_co const& p):co_(p.co_)
-	{
-
-	}
-public:
-	template<typename Function>
-	auto then(Function&& function)
-	{
-		return co_->then(std::forward<Function>(function));
-	}
-
-	template<typename...Params>
-	auto resolve(Params&&...args)
-	{
-		return co_->resolve(std::forward<Params>(args)...);
-	}
-
-	static auto create()
-	{
-		return promise_co{};
-	}
-private:
-	std::shared_ptr<Promise<Args...>> co_ = std::make_shared<Promise<Args...>>();
-};
-
-template<typename...Args>
-auto call_back(Args&&...args)->Promise<Args...>
-{
-	return Promise<Args...>(std::forward<Args>(args)...);
+	public:
+		promise() = default;
+		template<typename Lambda>
+		auto then(Lambda&& function) {
+			auto pm = function();
+			return pm;
+		}
+	};
 }
-
+#define GO(...) std::thread([]{ __VA_ARGS__ }).detach();
