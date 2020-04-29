@@ -84,57 +84,89 @@ namespace xmh {
 	private:
 		T* that_ = nullptr;
 	};
-
+	class Promise;
+	enum class promise_state {
+		pending,
+		resolve,
+		reject
+	};
 	struct promise_implementation {
 		promise_implementation() = default;
-		promise_implementation(promise_implementation const& p):task_snapshot_(p.task_snapshot_){
+		promise_implementation(promise_implementation const& p) :task_snapshot_(p.task_snapshot_), state_(p.state_){
 
 		}
-		template<typename Task, typename U = typename std::enable_if<!std::is_same<std::remove_reference_t<Task>, promise_implementation>::value>::type>
-		promise_implementation(Task&& task) :task_snapshot_(std::bind(std::forward<Task>(task), Resolver<promise_implementation>{ this }, Rejecter<promise_implementation>{this})) {
+		template<typename Task>
+		promise_implementation(Task const& task) : task_snapshot_(std::bind(task, Resolver<promise_implementation>{ this }, Rejecter<promise_implementation>{this})) {
 
 		}
 
 		template<typename...Args>
 		void resolve(Args&& ...args) {
 			auto tp = std::make_tuple(args...);
+			state_ = promise_state::resolve;
 			promise_.set_value(tp);
 		}
 
 		template<typename...Args>
 		void reject(Args&& ...args) {
-
+			auto tp = std::make_tuple(args...);
+			state_ = promise_state::reject;
+			promise_.set_value(tp);
 		}
 
-		template<typename Function, typename Tuple, std::size_t...Indexs>
-		auto deference(Function&& exectuor, Tuple&& tup, std::index_sequence<Indexs...>) {
+		template<typename Ret,typename Function,typename Tuple, std::size_t...Indexs>
+		auto deference(Function&& exectuor, Tuple&& tup, std::index_sequence<Indexs...>)->typename std::enable_if<!std::is_same<void, Ret>::value, Promise>::type {
 			return exectuor(std::get<Indexs>(tup)...);
 		}
 
-		template<typename Function,typename  = typename std::enable_if<!std::is_same<void, typename function_traits<typename std::remove_reference<Function>::type>::ret_type>::value>::type>
-		auto then(Function&& exectuor) {
-			task_snapshot_();
-			auto future = promise_.get_future();
-			auto v = future.get();
-			using traits = function_traits<typename std::remove_reference<Function>::type>;
-			using params_type = typename traits::non_reference_params_type;
-			return deference(std::forward<Function>(exectuor), any_cast<params_type>(v), std::make_index_sequence<traits::args_size>{});
+		template<typename Ret,typename Function,typename Tuple, std::size_t...Indexs>
+		auto deference(Function&& exectuor, Tuple&& tup, std::index_sequence<Indexs...>)->typename std::enable_if<std::is_same<void, Ret>::value, Promise>::type {
+			exectuor(std::get<Indexs>(tup)...);
+			return *this;
 		}
 
 		template<typename Function>
-		typename std::enable_if<std::is_same<void, typename function_traits<typename std::remove_reference<Function>::type>::ret_type>::value, promise_implementation&>::type then(Function&& exectuor) {
+		Promise then(Function&& resolve) {
+			if (state_ != promise_state::pending) {
+				return *this;
+			}
 			task_snapshot_();
 			auto future = promise_.get_future();
 			auto v = future.get();
 			using traits = function_traits<typename std::remove_reference<Function>::type>;
 			using params_type = typename traits::non_reference_params_type;
-			deference(std::forward<Function>(exectuor), any_cast<params_type>(v), std::make_index_sequence<traits::args_size>{});
+			if (state_ == promise_state::resolve) {
+				return deference<typename traits::ret_type>(std::forward<Function>(resolve), any_cast<params_type>(v), std::make_index_sequence<traits::args_size>{});
+			}
 			return *this;
 		}
+
+		template<typename Resolve,typename Reject>
+		Promise then(Resolve&& resolve, Reject&& reject) {
+			if (state_ != promise_state::pending) {
+				return *this;
+			}
+			task_snapshot_();
+			auto future = promise_.get_future();
+			auto v = future.get();
+			if (state_ == promise_state::resolve) {
+				using traits = function_traits<typename std::remove_reference<Resolve>::type>;
+				using params_type = typename traits::non_reference_params_type;
+				return deference<typename traits::ret_type>(std::forward<Resolve>(resolve), any_cast<params_type>(v), std::make_index_sequence<traits::args_size>{});
+			}
+			else if (state_ == promise_state::reject) {
+				using traits = function_traits<typename std::remove_reference<Reject>::type>;
+				using params_type = typename traits::non_reference_params_type;
+				return deference<typename traits::ret_type>(std::forward<Reject>(reject), any_cast<params_type>(v), std::make_index_sequence<traits::args_size>{});
+			}
+			return *this;
+		}
+
 
 	private:
 		std::function<void()> task_snapshot_;
 		std::promise<any> promise_;
+		promise_state state_ = promise_state::pending;
 	};
 	class Promise {
 	public:
@@ -142,13 +174,16 @@ namespace xmh {
 		Promise(Promise const& p) :promise_(p.promise_) {
 
 		}
-		template<typename Task, typename U = typename std::enable_if<!std::is_same<std::remove_reference_t<Task>, Promise>::value>::type>
-		Promise(Task&& task) : promise_(std::make_shared<promise_implementation>(std::forward<Task>(task))) {
+		Promise(promise_implementation const& v) :promise_(new promise_implementation{v}) {
+
+		}
+		template<typename Task>
+		Promise(Task const& task) : promise_(std::make_shared<promise_implementation>(task)) {
 		}
 	public:
-		template<typename Function>
-		auto then(Function&& exectuor) {
-			return promise_->then(std::forward<Function>(exectuor));
+		template<typename Resolve,typename...Reject>
+		auto then(Resolve&& exectuor, Reject&&...reject) {
+			return promise_->then(std::forward<Resolve>(exectuor), std::forward<Reject>(reject)...);
 		}
 	private:
 		std::shared_ptr<promise_implementation> promise_;
