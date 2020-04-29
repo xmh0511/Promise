@@ -1,23 +1,28 @@
 #include <iostream>
+#include <thread>
 #include "promise.hpp"
-int main() {
-	GO(xmh::get_promise().then([](){
-		xmh::promise_co<int> pm{};
-		std::thread([pm]() {
-			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-			pm.resolve(10);
-		}).detach();
-		return pm;
-	}).then([](int value){
-		xmh::promise_co<std::string,double> pm0{};
-		std::cout << value << std::endl;
-		pm0.resolve(std::string("abc"),20.12);
-		return pm0;
-	}).then([](std::string name,double age) {
-		std::cout << name << " "<<age << std::endl;
-	});)
 
-	std::cout << "first command?" << std::endl;
-	std::cin.get();
-	return 0;
+class Test {
+public:
+	double c;
+};
+int main() {
+	xmh::Promise([](auto resolve, auto reject) {
+		std::thread([resolve]() {
+			std::this_thread::sleep_for(std::chrono::seconds(3));
+			resolve(1000);
+			}).detach();
+		}).then([](int size) {
+			std::cout << size << std::endl;
+			return xmh::Promise([](auto resolve, auto reject) {
+				resolve(Test{ 10.23 });
+		}).then([](Test vv) {
+					return xmh::Promise([vv](auto resolve, auto reject) {
+						resolve(vv.c);
+						});
+					});
+		}).then([](double k) {
+				std::cout << k << std::endl;
+				});
+		std::getchar();
 }
