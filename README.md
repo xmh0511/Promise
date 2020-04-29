@@ -13,13 +13,13 @@ c++11 标准就能支持
 			resolve(1000);
 		}).detach();
 	}).then([](int size) {
-			std::cout << size << std::endl;
-			return xmh::Promise([](auto resolve, auto reject) {
-				resolve(Test{ 10.23 });
+		std::cout << size << std::endl;
+		return xmh::Promise([](auto resolve, auto reject) {
+		   resolve(Test{ 10.23 });
 	        }).then([](Test vv) {
-				return xmh::Promise([vv](auto resolve, auto reject) {
-					resolve(vv.c);
-				});
+		   return xmh::Promise([vv](auto resolve, auto reject) {
+		      resolve(vv.c);
+		   });
 	        });
 	}).then([](double k) {
 		std::cout << k << std::endl;
