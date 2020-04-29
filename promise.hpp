@@ -31,14 +31,14 @@ namespace xmh {
 	};
 	template<typename T>
 	struct any_data :any_data_hold {
-		template<typename U>
-		any_data(U&& v) :value_(v) {
+		any_data(T const& v) :value_(v) {
 
 		}
 		T value_;
 	};
 	struct any {
 		any() = default;
+		any(any const&) = default;
 		template<typename T, typename U = typename std::enable_if<!std::is_same<any, typename std::remove_reference<T>::type>::value>::type>
 		any(T&& value) :holder_(std::make_shared<any_data<typename std::remove_reference<T>::type>>(std::forward<T>(value))) {
 
@@ -87,7 +87,10 @@ namespace xmh {
 
 	struct promise_implementation {
 		promise_implementation() = default;
-		template<typename Task>
+		promise_implementation(promise_implementation const& p):task_snapshot_(p.task_snapshot_){
+
+		}
+		template<typename Task, typename U = typename std::enable_if<!std::is_same<std::remove_reference_t<Task>, promise_implementation>::value>::type>
 		promise_implementation(Task&& task) :task_snapshot_(std::bind(std::forward<Task>(task), Resolver<promise_implementation>{ this }, Rejecter<promise_implementation>{this})) {
 
 		}
@@ -108,7 +111,7 @@ namespace xmh {
 			return exectuor(std::get<Indexs>(tup)...);
 		}
 
-		template<typename Function>
+		template<typename Function,typename  = typename std::enable_if<!std::is_same<void, typename function_traits<typename std::remove_reference<Function>::type>::ret_type>::value>::type>
 		auto then(Function&& exectuor) {
 			task_snapshot_();
 			auto future = promise_.get_future();
@@ -116,6 +119,17 @@ namespace xmh {
 			using traits = function_traits<typename std::remove_reference<Function>::type>;
 			using params_type = typename traits::non_reference_params_type;
 			return deference(std::forward<Function>(exectuor), any_cast<params_type>(v), std::make_index_sequence<traits::args_size>{});
+		}
+
+		template<typename Function>
+		typename std::enable_if<std::is_same<void, typename function_traits<typename std::remove_reference<Function>::type>::ret_type>::value, promise_implementation&>::type then(Function&& exectuor) {
+			task_snapshot_();
+			auto future = promise_.get_future();
+			auto v = future.get();
+			using traits = function_traits<typename std::remove_reference<Function>::type>;
+			using params_type = typename traits::non_reference_params_type;
+			deference(std::forward<Function>(exectuor), any_cast<params_type>(v), std::make_index_sequence<traits::args_size>{});
+			return *this;
 		}
 
 	private:
