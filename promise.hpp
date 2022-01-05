@@ -57,8 +57,8 @@ namespace xmh {
 
 
 	template<typename T>
-	struct Resolver {
-		Resolver(T* that) :that_(that) {
+	struct Resolver_ {
+		Resolver_(T* that) :that_(that) {
 
 		}
 		template<typename...U>
@@ -71,8 +71,8 @@ namespace xmh {
 		T* that_ = nullptr;
 	};
 	template<typename T>
-	struct Rejecter {
-		Rejecter(T* that) :that_(that) {
+	struct Rejecter_ {
+		Rejecter_(T* that) :that_(that) {
 
 		}
 		template<typename...U>
@@ -96,7 +96,7 @@ namespace xmh {
 
 		}
 		template<typename Task>
-		promise_implementation(Task const& task) : task_snapshot_(std::bind(task, Resolver<promise_implementation>{ this }, Rejecter<promise_implementation>{this})) {
+		promise_implementation(Task const& task) : task_snapshot_(std::bind(task, Resolver_<promise_implementation>{ this }, Rejecter_<promise_implementation>{this})) {
 
 		}
 
@@ -125,8 +125,8 @@ namespace xmh {
 			return *this;
 		}
 
-		template<typename Function>
-		Promise then(Function&& resolve) {
+		template<class P,typename Function>
+		P then(Function&& resolve) {
 			if (state_ != promise_state::pending) {
 				return *this;
 			}
@@ -141,8 +141,8 @@ namespace xmh {
 			return *this;
 		}
 
-		template<typename Resolve,typename Reject>
-		Promise then(Resolve&& resolve, Reject&& reject) {
+		template<class P,typename Resolve,typename Reject>
+		P then(Resolve&& resolve, Reject&& reject) {
 			if (state_ != promise_state::pending) {
 				return *this;
 			}
@@ -183,9 +183,11 @@ namespace xmh {
 	public:
 		template<typename Resolve,typename...Reject>
 		auto then(Resolve&& exectuor, Reject&&...reject) {
-			return promise_->then(std::forward<Resolve>(exectuor), std::forward<Reject>(reject)...);
+			return promise_->then<Promise>(std::forward<Resolve>(exectuor), std::forward<Reject>(reject)...);
 		}
 	private:
 		std::shared_ptr<promise_implementation> promise_;
 	};
+	using Resolve = Resolver_<promise_implementation>;
+	using Reject = Rejecter_<promise_implementation>;
 }
